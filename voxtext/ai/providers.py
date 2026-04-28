@@ -148,54 +148,62 @@ class GeminiProvider(LLMProvider):
     """
     Provider cloud via Google Gemini API.
 
-    Usa o SDK google-genai. Requer API key do Google AI Studio.
+    Usa a REST API do Gemini diretamente via requests,
+    evitando dependências complexas (SDK google-genai).
     """
 
     def __init__(self, model: str = "gemini-2.5-flash", api_key: str = "") -> None:
         self.model = model
         self.api_key = api_key
-        self._client = None
 
-    def _get_client(self):
-        """Lazy init do client Gemini."""
-        if self._client is None:
-            try:
-                from google import genai
-            except ImportError:
-                raise RuntimeError(
-                    "SDK do Gemini não instalado. Execute:\n"
-                    "pip install google-genai"
-                )
-
-            import os
-            key = self.api_key or os.environ.get("GEMINI_API_KEY", "")
-            if not key:
-                raise RuntimeError(
-                    "API key do Gemini não configurada.\n"
-                    "Defina GEMINI_API_KEY como variável de ambiente ou "
-                    "insira a chave no campo da interface."
-                )
-
-            self._client = genai.Client(api_key=key)
-        return self._client
+    def _get_api_key(self) -> str:
+        import os
+        key = self.api_key or os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            raise RuntimeError(
+                "API key do Gemini não configurada.\n"
+                "Defina GEMINI_API_KEY como variável de ambiente ou "
+                "insira a chave no campo da interface."
+            )
+        return key
 
     def generate(self, prompt: str, system_prompt: str = "") -> LLMResponse:
+        import requests
+
         try:
-            client = self._get_client()
+            key = self._get_api_key()
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key}"
 
-            contents = prompt
+            contents = []
             if system_prompt:
-                contents = f"{system_prompt}\n\n---\n\n{contents}"
+                contents.append({"role": "user", "parts": [{"text": f"SYSTEM INSTRUCTION: {system_prompt}"}]})
+                contents.append({"role": "model", "parts": [{"text": "Understood. I will follow the instructions."}]})
+            contents.append({"role": "user", "parts": [{"text": prompt}]})
 
-            response = client.models.generate_content(
-                model=self.model,
-                contents=contents,
-            )
+            payload = {
+                "contents": contents,
+                "generationConfig": {"temperature": 0.2}
+            }
 
-            text = response.text or ""
-            tokens = 0
-            if hasattr(response, "usage_metadata") and response.usage_metadata:
-                tokens = getattr(response.usage_metadata, "total_token_count", 0)
+            resp = requests.post(url, json=payload, timeout=120)
+
+            if resp.status_code != 200:
+                err_msg = resp.json().get("error", {}).get("message", "Erro desconhecido")
+                return LLMResponse(
+                    text="", model=self.model, provider="gemini",
+                    success=False, error=f"Erro API ({resp.status_code}): {err_msg}"
+                )
+
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return LLMResponse(
+                    text="", model=self.model, provider="gemini",
+                    success=False, error="Nenhum texto retornado pela API."
+                )
+
+            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            tokens = data.get("usageMetadata", {}).get("totalTokenCount", 0)
 
             return LLMResponse(
                 text=text,
@@ -209,6 +217,16 @@ class GeminiProvider(LLMProvider):
                 text="", model=self.model, provider="gemini",
                 success=False, error=str(e),
             )
+        except requests.ConnectionError:
+            return LLMResponse(
+                text="", model=self.model, provider="gemini",
+                success=False, error="Não foi possível conectar ao Google Gemini."
+            )
+        except requests.Timeout:
+            return LLMResponse(
+                text="", model=self.model, provider="gemini",
+                success=False, error="Timeout na conexão com o Gemini."
+            )
         except Exception as e:
             return LLMResponse(
                 text="", model=self.model, provider="gemini",
@@ -216,23 +234,36 @@ class GeminiProvider(LLMProvider):
             )
 
     def test_connection(self) -> tuple[bool, str]:
+        import requests
         try:
-            client = self._get_client()
-            response = client.models.generate_content(
-                model=self.model,
-                contents="Responda apenas: OK",
-            )
-            if response.text:
+            key = self._get_api_key()
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={key}"
+            payload = {"contents": [{"role": "user", "parts": [{"text": "Responda apenas com: OK"}]}]}
+
+            resp = requests.post(url, json=payload, timeout=10)
+
+            if resp.status_code == 200:
                 return True, f"Gemini OK — modelo: {self.model}"
-            return False, "Gemini conectado mas sem resposta."
-        except Exception as e:
+            elif resp.status_code == 400:
+                return False, "Erro 400: API Key inválida ou requisição malformada."
+            elif resp.status_code == 403:
+                return False, "Erro 403: Permissão negada para esta API Key."
+            elif resp.status_code == 404:
+                return False, f"Erro 404: Modelo '{self.model}' não encontrado."
+            else:
+                return False, f"Erro HTTP {resp.status_code}"
+        except RuntimeError as e:
             return False, str(e)
+        except Exception as e:
+            return False, f"Erro de conexão: {e}"
 
     def list_models(self) -> list[str]:
         return [
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
         ]
 
 
