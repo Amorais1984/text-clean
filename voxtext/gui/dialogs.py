@@ -398,3 +398,328 @@ class SplitDialog:
         except Exception as e:
             messagebox.showerror("Erro ao Exportar", str(e), parent=self.dialog)
 
+
+class AIConfigDialog:
+    """
+    Diálogo de Configuração e Correção por IA.
+
+    Permite ao usuário escolher provider (Ollama/Gemini),
+    configurar modelo, testar conexão e corrigir o texto.
+    """
+
+    def __init__(self, parent: tk.Widget, text: str, app) -> None:
+        self.parent = parent
+        self.text = text
+        self.app = app
+        self.corrected_text: str | None = None
+        self._is_correcting = False
+
+    def show(self) -> str | None:
+        """Exibe o diálogo e retorna o texto corrigido ou None."""
+        self.dialog = tk.Toplevel(self.parent)
+        self.dialog.title("🤖 Correção por IA")
+        self.dialog.geometry("560x520")
+        self.dialog.minsize(500, 460)
+        self.dialog.transient(self.parent)
+        self.dialog.grab_set()
+
+        # Centralizar
+        self.dialog.update_idletasks()
+        x = self.parent.winfo_rootx() + (self.parent.winfo_width() - 560) // 2
+        y = self.parent.winfo_rooty() + (self.parent.winfo_height() - 520) // 2
+        self.dialog.geometry(f"+{x}+{y}")
+
+        main = ttk.Frame(self.dialog, padding=15)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        # ── Provider ──
+        provider_frame = ttk.LabelFrame(main, text="Provider de IA", padding=10)
+        provider_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.provider_var = tk.StringVar(value=self.app.settings.ai_provider)
+
+        radio_row = ttk.Frame(provider_frame)
+        radio_row.pack(fill=tk.X)
+
+        ttk.Radiobutton(
+            radio_row, text="🦙 Ollama (Local)",
+            variable=self.provider_var, value="ollama",
+            command=self._on_provider_change,
+        ).pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Radiobutton(
+            radio_row, text="✨ Gemini (Cloud)",
+            variable=self.provider_var, value="gemini",
+            command=self._on_provider_change,
+        ).pack(side=tk.LEFT)
+
+        # ── Configuração do Ollama ──
+        self.ollama_frame = ttk.Frame(provider_frame)
+        self.ollama_frame.pack(fill=tk.X, pady=(8, 0))
+
+        row1 = ttk.Frame(self.ollama_frame)
+        row1.pack(fill=tk.X, pady=2)
+        ttk.Label(row1, text="URL:", width=10).pack(side=tk.LEFT)
+        self.ollama_url_var = tk.StringVar(value=self.app.settings.ollama_url)
+        ttk.Entry(row1, textvariable=self.ollama_url_var, width=35).pack(side=tk.LEFT, padx=4)
+
+        row2 = ttk.Frame(self.ollama_frame)
+        row2.pack(fill=tk.X, pady=2)
+        ttk.Label(row2, text="Modelo:", width=10).pack(side=tk.LEFT)
+        self.ollama_model_var = tk.StringVar(value=self.app.settings.ollama_model)
+        self.ollama_model_entry = ttk.Combobox(
+            row2, textvariable=self.ollama_model_var, width=32,
+            values=["llama3.2", "llama3.1", "mistral", "gemma2", "qwen2.5", "phi3"],
+        )
+        self.ollama_model_entry.pack(side=tk.LEFT, padx=4)
+
+        # ── Configuração do Gemini ──
+        self.gemini_frame = ttk.Frame(provider_frame)
+
+        grow1 = ttk.Frame(self.gemini_frame)
+        grow1.pack(fill=tk.X, pady=2)
+        ttk.Label(grow1, text="API Key:", width=10).pack(side=tk.LEFT)
+        self.gemini_key_var = tk.StringVar(value=self.app.settings.gemini_api_key)
+        ttk.Entry(grow1, textvariable=self.gemini_key_var, width=35, show="•").pack(side=tk.LEFT, padx=4)
+
+        grow2 = ttk.Frame(self.gemini_frame)
+        grow2.pack(fill=tk.X, pady=2)
+        ttk.Label(grow2, text="Modelo:", width=10).pack(side=tk.LEFT)
+        self.gemini_model_var = tk.StringVar(value=self.app.settings.gemini_model)
+        ttk.Combobox(
+            grow2, textvariable=self.gemini_model_var, width=32,
+            values=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+            state="readonly",
+        ).pack(side=tk.LEFT, padx=4)
+
+        # ── Botão de Teste ──
+        test_row = ttk.Frame(provider_frame)
+        test_row.pack(fill=tk.X, pady=(8, 0))
+
+        self.btn_test = ttk.Button(
+            test_row, text="🔌 Testar Conexão", command=self._test_connection,
+            width=18,
+        )
+        self.btn_test.pack(side=tk.LEFT)
+
+        self.test_label = ttk.Label(test_row, text="", font=("Segoe UI", 9))
+        self.test_label.pack(side=tk.LEFT, padx=8)
+
+        # ── Info do Texto ──
+        ttk.Separator(main).pack(fill=tk.X, pady=8)
+
+        info_frame = ttk.Frame(main)
+        info_frame.pack(fill=tk.X)
+
+        total_chars = len(self.text)
+        total_words = len(self.text.split())
+        ttk.Label(
+            info_frame,
+            text=f"📝 Texto: {total_chars:,} caracteres  •  {total_words:,} palavras",
+            font=("Segoe UI", 9),
+        ).pack(side=tk.LEFT)
+
+        # ── Progresso ──
+        progress_frame = ttk.Frame(main)
+        progress_frame.pack(fill=tk.X, pady=(8, 0))
+
+        self.progress = ttk.Progressbar(progress_frame, mode="determinate", length=350)
+        self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.progress_label = ttk.Label(
+            progress_frame, text="", font=("Segoe UI", 9), width=20,
+        )
+        self.progress_label.pack(side=tk.LEFT, padx=(8, 0))
+
+        # ── Resultado ──
+        result_frame = ttk.LabelFrame(main, text="Resultado", padding=8)
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 10))
+
+        scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.result_text = tk.Text(
+            result_frame,
+            wrap=tk.WORD,
+            font=("Cascadia Code", 10),
+            background="#1e1e2e",
+            foreground="#cdd6f4",
+            border=0,
+            padx=8, pady=4,
+            height=8,
+            state=tk.DISABLED,
+            yscrollcommand=scrollbar.set,
+        )
+        self.result_text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.configure(command=self.result_text.yview)
+
+        # ── Botões ──
+        btn_frame = ttk.Frame(main)
+        btn_frame.pack(fill=tk.X)
+
+        self.btn_apply = ttk.Button(
+            btn_frame, text="✅ Aplicar Correção",
+            command=self._apply_correction,
+            style="success.TButton",
+            state=tk.DISABLED,
+        )
+        self.btn_apply.pack(side=tk.RIGHT, padx=(5, 0))
+
+        self.btn_correct = ttk.Button(
+            btn_frame, text="🤖 Corrigir Texto",
+            command=self._start_correction,
+            style="info.TButton",
+        )
+        self.btn_correct.pack(side=tk.RIGHT, padx=(5, 0))
+
+        ttk.Button(
+            btn_frame, text="Fechar", command=self._close,
+        ).pack(side=tk.RIGHT)
+
+        # Mostrar frame correto
+        self._on_provider_change()
+
+        self.dialog.wait_window()
+        return self.corrected_text
+
+    def _on_provider_change(self) -> None:
+        """Alterna campos conforme o provider selecionado."""
+        if self.provider_var.get() == "ollama":
+            self.gemini_frame.pack_forget()
+            self.ollama_frame.pack(fill=tk.X, pady=(8, 0))
+        else:
+            self.ollama_frame.pack_forget()
+            self.gemini_frame.pack(fill=tk.X, pady=(8, 0))
+        self.test_label.configure(text="")
+
+    def _test_connection(self) -> None:
+        """Testa a conexão com o provider selecionado."""
+        self.test_label.configure(text="Testando...", foreground="#f9e2af")
+        self.dialog.update()
+
+        from voxtext.ai.providers import create_provider
+
+        provider_name = self.provider_var.get()
+        try:
+            if provider_name == "ollama":
+                provider = create_provider(
+                    "ollama",
+                    model=self.ollama_model_var.get(),
+                    base_url=self.ollama_url_var.get(),
+                )
+            else:
+                provider = create_provider(
+                    "gemini",
+                    model=self.gemini_model_var.get(),
+                    api_key=self.gemini_key_var.get(),
+                )
+
+            success, msg = provider.test_connection()
+
+            if success:
+                self.test_label.configure(text=f"✅ {msg}", foreground="#a6e3a1")
+                # Se Ollama, atualizar lista de modelos
+                if provider_name == "ollama":
+                    models = provider.list_models()
+                    if models:
+                        self.ollama_model_entry.configure(values=models)
+            else:
+                self.test_label.configure(text=f"❌ {msg}", foreground="#f38ba8")
+
+        except Exception as e:
+            self.test_label.configure(text=f"❌ {e}", foreground="#f38ba8")
+
+    def _start_correction(self) -> None:
+        """Inicia a correção em thread separada."""
+        if self._is_correcting:
+            return
+
+        self._is_correcting = True
+        self.btn_correct.configure(state=tk.DISABLED)
+        self.btn_apply.configure(state=tk.DISABLED)
+        self.progress["value"] = 0
+        self.progress_label.configure(text="Iniciando...")
+
+        import threading
+
+        def run():
+            try:
+                provider_name = self.provider_var.get()
+                if provider_name == "ollama":
+                    model = self.ollama_model_var.get()
+                    api_key = ""
+                    base_url = self.ollama_url_var.get()
+                else:
+                    model = self.gemini_model_var.get()
+                    api_key = self.gemini_key_var.get()
+                    base_url = ""
+
+                result = self.app.correct_with_ai(
+                    text=self.text,
+                    provider_name=provider_name,
+                    model=model,
+                    api_key=api_key,
+                    base_url=base_url,
+                    on_progress=self._update_progress,
+                )
+
+                self.dialog.after(0, lambda: self._on_correction_done(result))
+
+            except Exception as e:
+                self.dialog.after(0, lambda: self._on_correction_error(str(e)))
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+    def _update_progress(self, current: int, total: int) -> None:
+        """Thread-safe progress update."""
+        if total > 0:
+            pct = int((current / total) * 100)
+            self.dialog.after(0, lambda: self._set_progress(pct, f"Chunk {current}/{total}"))
+
+    def _set_progress(self, value: int, label: str) -> None:
+        self.progress["value"] = value
+        self.progress_label.configure(text=label)
+
+    def _on_correction_done(self, result) -> None:
+        """Callback quando correção termina."""
+        self._is_correcting = False
+        self.btn_correct.configure(state=tk.NORMAL)
+
+        if not result.success:
+            self.progress_label.configure(text="❌ Erro")
+            messagebox.showerror(
+                "Erro na Correção",
+                f"Provider: {result.provider}\n\n{result.error}",
+                parent=self.dialog,
+            )
+            return
+
+        self.progress["value"] = 100
+        self.progress_label.configure(
+            text=f"✅ {result.chunks_processed} chunk(s) • {result.total_tokens} tokens"
+        )
+
+        # Exibir resultado
+        self.result_text.configure(state=tk.NORMAL)
+        self.result_text.delete("1.0", tk.END)
+        self.result_text.insert("1.0", result.corrected_text)
+        self.result_text.configure(state=tk.DISABLED)
+
+        self.corrected_text = result.corrected_text
+        self.btn_apply.configure(state=tk.NORMAL)
+
+    def _on_correction_error(self, error: str) -> None:
+        self._is_correcting = False
+        self.btn_correct.configure(state=tk.NORMAL)
+        self.progress_label.configure(text="❌ Erro")
+        messagebox.showerror("Erro", error, parent=self.dialog)
+
+    def _apply_correction(self) -> None:
+        """Aplica a correção e fecha o diálogo."""
+        self.dialog.destroy()
+
+    def _close(self) -> None:
+        """Fecha sem aplicar."""
+        self.corrected_text = None
+        self.dialog.destroy()

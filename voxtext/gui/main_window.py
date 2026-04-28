@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 from voxtext.gui.toolbar import Toolbar
 from voxtext.gui.editor_panel import EditorPanel
-from voxtext.gui.dialogs import ExportDialog, AboutDialog, SplitDialog
+from voxtext.gui.dialogs import ExportDialog, AboutDialog, SplitDialog, AIConfigDialog
 
 
 class MainWindow:
@@ -58,6 +58,7 @@ class MainWindow:
             on_process=self._on_process,
             on_export=self._on_export,
             on_split=self._on_split,
+            on_ai_correct=self._on_ai_correct,
             on_mode_change=self._on_mode_change,
         )
         self.toolbar.pack(fill=tk.X, padx=5, pady=(5, 0))
@@ -104,6 +105,7 @@ class MainWindow:
         self.root.bind("<Control-o>", lambda e: self._on_import())
         self.root.bind("<Control-s>", lambda e: self._on_export())
         self.root.bind("<Control-d>", lambda e: self._on_split())
+        self.root.bind("<Control-i>", lambda e: self._on_ai_correct())
         self.root.bind("<F5>", lambda e: self._on_process())
 
     def _build_menu(self) -> None:
@@ -122,6 +124,7 @@ class MainWindow:
         proc_menu.add_command(label="Processar (F5)", command=self._on_process)
         proc_menu.add_separator()
         proc_menu.add_command(label="Dividir Texto (Ctrl+D)", command=self._on_split)
+        proc_menu.add_command(label="🤖 Corrigir com IA (Ctrl+I)", command=self._on_ai_correct)
         menubar.add_cascade(label="Processar", menu=proc_menu)
 
         # Menu Ajuda
@@ -288,6 +291,28 @@ class MainWindow:
 
         dialog = SplitDialog(self.root, text, self.app)
         dialog.show()
+
+    def _on_ai_correct(self) -> None:
+        """Abre o diálogo de correção por IA."""
+        text = self.processed_panel.get_text()
+        if not text.strip():
+            text = self.original_panel.get_text()
+        if not text.strip():
+            messagebox.showwarning(
+                "Aviso", "Importe e processe um arquivo primeiro.",
+                parent=self.root,
+            )
+            return
+
+        dialog = AIConfigDialog(self.root, text, self.app)
+        corrected = dialog.show()
+
+        if corrected is not None:
+            self.processed_panel.set_text(corrected)
+            self.status_text.configure(
+                text="✅ Texto corrigido por IA aplicado"
+                + (f"  |  Arquivo: {self._current_file.name}" if self._current_file else "")
+            )
 
     def run(self) -> None:
         """Inicia o loop principal da interface."""

@@ -74,6 +74,15 @@ class Settings:
     # Customizações do usuário
     custom_abbreviations: dict[str, str] = field(default_factory=dict)
 
+    # IA / LLM
+    ai_enabled: bool = False
+    ai_provider: str = "ollama"                     # "ollama" ou "gemini"
+    ollama_model: str = "llama3.2"
+    ollama_url: str = "http://localhost:11434"
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_api_key: str = ""
+    ai_max_chunk_size: int = 3000                   # Chars por chunk para IA
+
     @property
     def pause_durations(self) -> PauseDurations:
         """Retorna as durações de pausa para o modo atual."""

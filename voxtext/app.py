@@ -23,6 +23,8 @@ from voxtext.exporters.txt_exporter import TxtExporter
 from voxtext.exporters.json_exporter import JsonExporter
 from voxtext.exporters.ssml_exporter import SsmlExporter
 from voxtext.text_splitter import split_text_at_sentences, TextChunk
+from voxtext.ai.providers import create_provider
+from voxtext.ai.corrector import AICorrector, CorrectionResult
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +203,50 @@ class VoxTextApp:
         logger.info("Exportados %d arquivos (%s) em %s", len(exported), format_name, output_dir)
         return exported
 
+    def correct_with_ai(
+        self,
+        text: str,
+        provider_name: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> CorrectionResult:
+        """
+        Corrige o texto usando IA (Ollama ou Gemini).
+
+        Args:
+            text: Texto a ser corrigido.
+            provider_name: 'ollama' ou 'gemini' (override de settings).
+            model: Nome do modelo (override).
+            api_key: API key para Gemini (override).
+            base_url: URL do Ollama (override).
+            on_progress: Callback (chunk_atual, total_chunks).
+
+        Returns:
+            CorrectionResult com o texto corrigido.
+        """
+        prov = provider_name or self.settings.ai_provider
+
+        if prov == "ollama":
+            mdl = model or self.settings.ollama_model
+            url = base_url or self.settings.ollama_url
+            provider = create_provider("ollama", model=mdl, base_url=url)
+        else:
+            mdl = model or self.settings.gemini_model
+            key = api_key or self.settings.gemini_api_key
+            provider = create_provider("gemini", model=mdl, api_key=key)
+
+        corrector = AICorrector(
+            provider=provider,
+            max_chunk_size=self.settings.ai_max_chunk_size,
+        )
+
+        result = corrector.correct(text, on_progress=on_progress)
+        logger.info(
+            "Correção IA (%s/%s): %d chunks, %d tokens, sucesso=%s",
+            result.provider, result.model,
+            result.chunks_processed, result.total_tokens,
+            result.success,
+        )
+        return result

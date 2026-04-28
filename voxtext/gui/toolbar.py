@@ -22,6 +22,7 @@ class Toolbar(ttk.Frame):
         on_process: Callable[[], None],
         on_export: Callable[[], None],
         on_split: Callable[[], None],
+        on_ai_correct: Callable[[], None],
         on_mode_change: Callable[[str], None],
         **kwargs,
     ) -> None:
@@ -31,6 +32,7 @@ class Toolbar(ttk.Frame):
         self._on_process = on_process
         self._on_export = on_export
         self._on_split = on_split
+        self._on_ai_correct = on_ai_correct
         self._on_mode_change = on_mode_change
 
         self._build_ui()
@@ -97,6 +99,13 @@ class Toolbar(ttk.Frame):
         )
         self.btn_split.pack(side=tk.LEFT, padx=(0, 5))
 
+        # ── Botão IA Corrigir ──
+        self.btn_ai = ttk.Button(
+            self, text="🤖 IA", command=self._on_ai_correct,
+            style="danger.TButton", width=10, state=tk.DISABLED,
+        )
+        self.btn_ai.pack(side=tk.LEFT, padx=(0, 5))
+
         # ── Barra de Progresso ──
         self.progress = ttk.Progressbar(
             self, mode="determinate", length=200,
@@ -124,7 +133,8 @@ class Toolbar(ttk.Frame):
         self.mode_combo.configure(state="disabled" if processing else "readonly")
 
     def enable_export(self, enabled: bool = True) -> None:
-        """Habilita/desabilita botão de exportação e divisão."""
+        """Habilita/desabilita botão de exportação, divisão e IA."""
         state = tk.NORMAL if enabled else tk.DISABLED
         self.btn_export.configure(state=state)
         self.btn_split.configure(state=state)
+        self.btn_ai.configure(state=state)
