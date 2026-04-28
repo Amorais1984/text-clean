@@ -144,13 +144,19 @@ class VoxTextApp:
                      len(self.last_chunks), max_chars)
         return self.last_chunks
 
-    def export_chunks(self, chunks: list[TextChunk], output_dir: Path) -> list[Path]:
+    def export_chunks(
+        self,
+        chunks: list[TextChunk],
+        output_dir: Path,
+        format_name: str = "txt",
+    ) -> list[Path]:
         """
-        Exporta cada chunk como um arquivo TXT individual.
+        Exporta cada chunk como um arquivo individual no formato escolhido.
 
         Args:
             chunks: Lista de TextChunk.
             output_dir: Diretório de saída.
+            format_name: Formato de exportação ('txt', 'json', 'ssml').
 
         Returns:
             Lista de caminhos dos arquivos criados.
@@ -158,12 +164,40 @@ class VoxTextApp:
         output_dir.mkdir(parents=True, exist_ok=True)
         exported: list[Path] = []
 
+        ext_map = {"txt": ".txt", "json": ".json", "ssml": ".ssml"}
+        ext = ext_map.get(format_name, ".txt")
+        exporter = self._exporters.get(format_name)
+
         for chunk in chunks:
-            filename = f"parte_{chunk.index:03d}.txt"
+            filename = f"parte_{chunk.index:03d}{ext}"
             filepath = output_dir / filename
-            filepath.write_text(chunk.text, encoding="utf-8")
+
+            if exporter and format_name != "txt":
+                # Criar um mini ProcessingResult para este chunk
+                from voxtext.models.document import Segment, SegmentType, ProcessingStats
+                mini_result = ProcessingResult(
+                    original_text=chunk.text,
+                    processed_text=chunk.text,
+                    segments=[Segment(
+                        text=chunk.text,
+                        segment_type=SegmentType.PARAGRAPH,
+                        index=0,
+                        ssml_markup=chunk.text,
+                    )],
+                    stats=ProcessingStats(
+                        original_char_count=chunk.char_count,
+                        processed_char_count=chunk.char_count,
+                        segment_count=1,
+                    ),
+                    processing_mode=self.settings.processing_mode.value,
+                )
+                content = exporter.export_to_string(mini_result)
+                filepath.write_text(content, encoding="utf-8")
+            else:
+                filepath.write_text(chunk.text, encoding="utf-8")
+
             exported.append(filepath)
 
-        logger.info("Exportados %d arquivos em %s", len(exported), output_dir)
+        logger.info("Exportados %d arquivos (%s) em %s", len(exported), format_name, output_dir)
         return exported
 

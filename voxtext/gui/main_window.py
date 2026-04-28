@@ -226,20 +226,39 @@ class MainWindow:
             )
             return
 
-        dialog = ExportDialog(self.root, on_export=None)
+        # Passar total de caracteres para exibir no diálogo
+        total_chars = len(self.app.last_result.processed_text)
+        dialog = ExportDialog(self.root, total_chars=total_chars)
         result = dialog.show()
 
-        if result:
-            fmt, path = result
-            try:
+        if not result:
+            return
+
+        fmt, path, split_max = result
+
+        try:
+            if split_max is not None:
+                # Exportação com divisão
+                text = self.app.last_result.processed_text
+                chunks = self.app.split_text(text, split_max)
+                exported = self.app.export_chunks(chunks, path, fmt)
+                messagebox.showinfo(
+                    "Exportado",
+                    f"{len(exported)} arquivo(s) exportado(s) em:\n{path}\n\n"
+                    + "\n".join(f"  • {p.name}" for p in exported[:10])
+                    + ("\n  ..." if len(exported) > 10 else ""),
+                    parent=self.root,
+                )
+            else:
+                # Exportação normal (arquivo único)
                 exported = self.app.export_result(fmt, path)
                 messagebox.showinfo(
                     "Exportado",
                     f"Arquivo exportado com sucesso:\n{exported}",
                     parent=self.root,
                 )
-            except Exception as e:
-                messagebox.showerror("Erro ao Exportar", str(e), parent=self.root)
+        except Exception as e:
+            messagebox.showerror("Erro ao Exportar", str(e), parent=self.root)
 
     def _on_mode_change(self, mode_name: str) -> None:
         mode_map = {

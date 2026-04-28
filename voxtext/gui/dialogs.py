@@ -13,30 +13,33 @@ from typing import Callable
 
 
 class ExportDialog:
-    """Diálogo de exportação com seleção de formato e caminho."""
+    """Diálogo de exportação com seleção de formato e opção de divisão."""
 
     def __init__(
         self,
         parent: tk.Widget,
-        on_export: Callable[[str, Path], None],
+        on_export: Callable[[str, Path], None] | None = None,
+        total_chars: int = 0,
     ) -> None:
         self.parent = parent
         self.on_export = on_export
-        self.result: tuple[str, Path] | None = None
+        self.total_chars = total_chars
+        # Resultado: (formato, caminho, max_chars_divisão_ou_None)
+        self.result: tuple[str, Path, int | None] | None = None
 
-    def show(self) -> tuple[str, Path] | None:
-        """Exibe o diálogo e retorna (formato, caminho) ou None."""
+    def show(self) -> tuple[str, Path, int | None] | None:
+        """Exibe o diálogo e retorna (formato, caminho, split_chars) ou None."""
         dialog = tk.Toplevel(self.parent)
         dialog.title("Exportar Resultado")
-        dialog.geometry("420x220")
+        dialog.geometry("460x340")
         dialog.resizable(False, False)
         dialog.transient(self.parent)
         dialog.grab_set()
 
         # Centralizar
         dialog.update_idletasks()
-        x = self.parent.winfo_rootx() + (self.parent.winfo_width() - 420) // 2
-        y = self.parent.winfo_rooty() + (self.parent.winfo_height() - 220) // 2
+        x = self.parent.winfo_rootx() + (self.parent.winfo_width() - 460) // 2
+        y = self.parent.winfo_rooty() + (self.parent.winfo_height() - 340) // 2
         dialog.geometry(f"+{x}+{y}")
 
         main = ttk.Frame(dialog, padding=20)
@@ -58,27 +61,90 @@ class ExportDialog:
 
         ttk.Separator(main).pack(fill=tk.X, pady=10)
 
+        # ── Divisão de Texto ──
+        split_var = tk.BooleanVar(value=False)
+        split_check = ttk.Checkbutton(
+            main, text="✂️ Dividir em múltiplos arquivos",
+            variable=split_var, command=lambda: _toggle_split(),
+        )
+        split_check.pack(anchor=tk.W)
+
+        split_frame = ttk.Frame(main)
+        split_frame.pack(fill=tk.X, padx=20, pady=(4, 0))
+
+        ttk.Label(split_frame, text="Máximo de caracteres por arquivo:").pack(side=tk.LEFT)
+
+        chars_var = tk.StringVar(value="5000")
+        chars_entry = ttk.Entry(split_frame, textvariable=chars_var, width=8)
+        chars_entry.pack(side=tk.LEFT, padx=6)
+        chars_entry.configure(state=tk.DISABLED)
+
+        # Info do texto
+        if self.total_chars > 0:
+            ttk.Label(
+                main,
+                text=f"   Texto total: {self.total_chars:,} caracteres",
+                foreground="#888888",
+                font=("Segoe UI", 9),
+            ).pack(anchor=tk.W, padx=15, pady=(2, 0))
+
+        def _toggle_split():
+            if split_var.get():
+                chars_entry.configure(state=tk.NORMAL)
+            else:
+                chars_entry.configure(state=tk.DISABLED)
+
+        ttk.Separator(main).pack(fill=tk.X, pady=10)
+
         # ── Botões ──
         btn_frame = ttk.Frame(main)
         btn_frame.pack(fill=tk.X)
 
         def do_export():
             fmt = format_var.get()
-            ext_map = {"txt": ".txt", "json": ".json", "ssml": ".ssml"}
-            filepath = filedialog.asksaveasfilename(
-                parent=dialog,
-                title="Salvar como",
-                defaultextension=ext_map[fmt],
-                filetypes=[
-                    ("Texto", "*.txt"),
-                    ("JSON", "*.json"),
-                    ("SSML", "*.ssml"),
-                    ("Todos", "*.*"),
-                ],
-            )
-            if filepath:
-                self.result = (fmt, Path(filepath))
-                dialog.destroy()
+            split_max = None
+
+            if split_var.get():
+                try:
+                    split_max = int(chars_var.get())
+                    if split_max < 100:
+                        messagebox.showwarning(
+                            "Aviso", "O mínimo é 100 caracteres por arquivo.",
+                            parent=dialog,
+                        )
+                        return
+                except ValueError:
+                    messagebox.showerror(
+                        "Erro", "Informe um número válido de caracteres.",
+                        parent=dialog,
+                    )
+                    return
+
+                # Para divisão, pedir diretório de saída
+                dirpath = filedialog.askdirectory(
+                    parent=dialog,
+                    title="Selecione a pasta para salvar os arquivos",
+                )
+                if dirpath:
+                    self.result = (fmt, Path(dirpath), split_max)
+                    dialog.destroy()
+            else:
+                # Exportação normal, pedir arquivo
+                ext_map = {"txt": ".txt", "json": ".json", "ssml": ".ssml"}
+                filepath = filedialog.asksaveasfilename(
+                    parent=dialog,
+                    title="Salvar como",
+                    defaultextension=ext_map[fmt],
+                    filetypes=[
+                        ("Texto", "*.txt"),
+                        ("JSON", "*.json"),
+                        ("SSML", "*.ssml"),
+                        ("Todos", "*.*"),
+                    ],
+                )
+                if filepath:
+                    self.result = (fmt, Path(filepath), None)
+                    dialog.destroy()
 
         ttk.Button(
             btn_frame, text="Exportar", command=do_export,
